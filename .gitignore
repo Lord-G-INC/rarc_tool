@@ -14,3 +14,4 @@ Cargo.lock
 *.exe
 rarc_tool*
 *.arc
+.vscode

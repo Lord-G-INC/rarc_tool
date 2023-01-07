@@ -57,7 +57,7 @@ pub struct DataHeader {
 
 pub mod folder {
     use super::*;
-    #[derive(Debug, Clone, Copy, Default)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     #[binrw]
     pub struct Node {
         pub shortname: [u8; 4],
@@ -81,7 +81,7 @@ pub mod dir {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct FileNode {
     pub node: folder::Node,
     pub isroot: bool,
@@ -233,5 +233,75 @@ impl <'a> RARC<'a> {
                 std::fs::write(path.join(&child.name), &child.data).unwrap();
             }
         }
+    }
+    pub fn createdir(&mut self, name: &str, attr: FileAttr) {
+        self.dirs.push(DirNode { name: String::from(name), attr, ..Default::default() });
+    }
+    pub fn createfile(&mut self, name: &str, attr: FileAttr) -> usize {
+        self.createdir(name, attr);
+        let len = self.dirs.len();
+        let dir = &mut self.dirs[len - 1];
+        if self.sync {
+            dir.node.nodeidx = self.nextidx;
+            self.nextidx += 1;
+        }
+        len - 1
+    }
+    pub fn createfolder(&mut self, name: &str, parent: &FileNode) -> usize {
+        let mut node = FileNode { name: String::from(name), ..Default::default() };
+        node.node.shortname = (&node.name[0..4])
+        .to_ascii_uppercase().as_bytes().try_into().unwrap_or_default();
+        self.folders.push(node);
+        self.createdir(name, FileAttr::FOLDER);
+        self.createdir(".", FileAttr::FOLDER);
+        let mut pos = self.dirs.len() - 1;
+        self.dirs[pos].node.data = (self.folders.len() - 1) as u32;
+        self.createdir("..", FileAttr::FOLDER);
+        let pidx = self.folders.iter().position(|x| x == parent).unwrap_or_default();
+        pos = self.dirs.len() - 1;
+        self.dirs[pos].node.data = pidx as u32;
+        self.folders.len() - 1
+    }
+    pub fn importnode(&mut self, path: String, parent: &FileNode, attr: FileAttr) {
+        let iter = std::fs::read_dir(path).unwrap()
+        .into_iter().filter_map(|x| x.ok()).collect::<Vec<_>>();
+        for item in iter {
+            let path = item.path();
+            let name: String = path.file_name().unwrap_or_default().to_string_lossy().into();
+            if name == "." || name == ".." {
+                continue;
+            }
+            if path.exists() && path.is_dir() {
+                let pos = self.createfolder(&name, parent);
+                let node = self.folders[pos].clone();
+                let path = format!("{}", path.display());
+                self.importnode(path, &node, attr);
+            } else if path.exists() && path.is_file() {
+                let pos = self.createfile(&name, attr);
+                let dir = &mut self.dirs[pos];
+                dir.data = std::fs::read(path).unwrap_or_default();
+                dir.node.datasize = dir.data.len() as u32;
+            }
+        }
+    }
+    pub fn importfromfolder(&mut self, path: &str, attr: FileAttr) {
+        if self.folders.len() == 0 {
+            let lastslash = path.rfind('\\').unwrap_or_default();
+            let name = match lastslash {
+                0 => path,
+                _ => &path[lastslash+1..]
+            };
+            let mut root = FileNode {name: name.into(), isroot: true, ..Default::default()};
+            root.node.shortname = *b"ROOT";
+            self.folders.push(root);
+            self.createdir(".", FileAttr::FOLDER);
+            let mut pos = self.dirs.len() - 1;
+            self.dirs[pos].node.data = 0;
+            self.createdir("..", FileAttr::FOLDER);
+            pos = self.dirs.len() - 1;
+            self.dirs[pos].node.data = 0;
+        }
+        let root = self.folders[0].clone();
+        self.importnode(path.into(), &root, attr);
     }
 }
