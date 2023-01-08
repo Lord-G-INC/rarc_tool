@@ -315,6 +315,7 @@ impl <'a> RARC<'a> {
             nodelen += 1;
         }
         self.folders[parpos].node.filecount = nodelen + 2;
+        let dirptr = self.folders[parpos].dir.unwrap();
         for fpos in &dirpos {
             let fpos = *fpos;
             let fnode = &self.folders[fpos];
