@@ -198,7 +198,7 @@ impl <'a> RARC<'a> {
                 }
             }
         }
-        for folder in &mut self.folders {
+        for folder in &self.folders {
             for y in folder.node.firstfileoff..(folder.node.firstfileoff+folder.node.filecount as u32) {
                 let y = y as usize;
                 let dir = &mut self.dirs[y];
