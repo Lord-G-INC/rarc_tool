@@ -70,7 +70,7 @@ pub mod folder {
 
 pub mod dir {
     use super::*;
-    #[derive(Debug, Clone, Copy, Default)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
     #[binrw]
     pub struct Node {
         pub nodeidx: u16,
@@ -89,7 +89,7 @@ pub struct FileNode {
     pub dir: Option<*const DirNode>
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DirNode {
     pub node: dir::Node,
     pub attr: FileAttr,
