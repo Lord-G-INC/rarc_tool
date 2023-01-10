@@ -4,9 +4,11 @@ use binrw::prelude::*;
 use binrw::*;
 use bitflags::*;
 use crate::seektask;
+use serde::*;
+use serde_json;
 
 bitflags! {
-    #[derive(Default)]
+    #[derive(Default, Serialize, Deserialize)]
     #[binrw]
     pub struct FileAttr: u8 {
         const FILE = 0x1;
@@ -70,7 +72,7 @@ pub mod folder {
 
 pub mod dir {
     use super::*;
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
     #[binrw]
     pub struct Node {
         pub nodeidx: u16,
@@ -89,14 +91,17 @@ pub struct FileNode {
     pub dir: Option<*const DirNode>
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DirNode {
     pub node: dir::Node,
     pub attr: FileAttr,
     pub name: String,
     pub nameoff: u16,
+    #[serde(skip)]
     pub data: Vec<u8>,
+    #[serde(skip)]
     pub folder: Option<*const FileNode>,
+    #[serde(skip)]
     pub parent: Option<*const FileNode>
 }
 
@@ -246,11 +251,17 @@ impl <'a> RARC<'a> {
             for i in 1..tree.len() {
                 path = path.join(&tree[i].name);
             }
-            for child in children.into_iter()
+            std::fs::create_dir_all(&path).unwrap();
+            for child in children.iter()
             .filter(|x| x.attr.contains(FileAttr::FILE)) {
-                std::fs::create_dir_all(&path).unwrap();
                 std::fs::write(path.join(&child.name), &child.data).unwrap();
             }
+            let fptr = children[children.len() - 2];
+            let rptr = children[children.len() - 1];
+            let mut msg = serde_json::to_string_pretty(fptr).unwrap_or_default();
+            std::fs::write(path.join("folder.json"), &msg).unwrap();
+            msg = serde_json::to_string_pretty(rptr).unwrap_or_default();
+            std::fs::write(path.join("parent.json"), msg).unwrap();
         }
     }
 }
