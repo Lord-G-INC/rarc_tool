@@ -31,7 +31,7 @@ pub fn readntstringat<'a, T: Seek + BufRead>(reader: &'a mut T, pos: u64) -> Str
     })
 }
 
-pub fn seektask<'a, R, T: Seek + BufRead, G: FnMut(SeekTask<'a,T>) -> R>
+pub fn seektask<'a, R, T: Seek, G: FnMut(SeekTask<'a,T>) -> R>
 (reader: &'a mut T, pos: u64, mut func: G) -> R {
     let task = SeekTask::new(reader, pos);
     func(task)
