@@ -1,9 +1,9 @@
-use std::{borrow::Cow, io::{Cursor, Read}, path::PathBuf};
+use std::{borrow::Cow, io::{Cursor, Read}, path::{PathBuf, Path}};
 
 use binrw::prelude::*;
 use binrw::*;
 use bitflags::*;
-use crate::seektask;
+use crate::{seektask, lastpos::LastPos};
 use serde::*;
 use serde_json;
 
@@ -128,11 +128,24 @@ impl<'a> Default for RARC<'a> {
 }
 
 #[inline(always)]
-fn read<T: BinRead, R: BinReaderExt>(endian: Endian, reader: &mut R) -> binrw::BinResult<T> where <T as binrw::BinRead>::Args: std::default::Default {
+fn read<T: BinRead, R: BinReaderExt>(endian: Endian, reader: &mut R) -> binrw::BinResult<T>
+where <T as BinRead>::Args: std::default::Default {
     Ok(match endian {
         Endian::Big => reader.read_be()?,
         Endian::Little => reader.read_le()?,
     })
+}
+
+#[inline(always)]
+fn readjson<P: AsRef<Path>>(path: P) -> DirNode {
+    let msg = std::fs::read_to_string(path).unwrap_or_default();
+    serde_json::from_str(&msg).unwrap_or_default()
+}
+
+#[inline(always)]
+fn write<T: BinWrite, W: BinWriterExt>(endian: Endian, item: T, writer: &mut W) -> binrw::BinResult<()>
+where <T as BinWrite>::Args: std::default::Default {
+    writer.write_type(&item, endian)
 }
 
 impl <'a> RARC<'a> {
@@ -263,5 +276,81 @@ impl <'a> RARC<'a> {
             msg = serde_json::to_string_pretty(rptr).unwrap_or_default();
             std::fs::write(path.join("parent.json"), msg).unwrap();
         }
+    }
+    fn createdir(&mut self, dirname: &str, attr: FileAttr) -> usize {
+        let mut newdir = DirNode {attr, name: dirname.into(), ..Default::default()};
+        newdir.node.nodeidx = u16::MAX;
+        self.dirs.push(newdir);
+        self.dirs.lastpos()
+    }
+    fn createfile(&mut self, filename: &str, attr: FileAttr) -> usize {
+        let mut newfile = DirNode {attr, name: filename.into(), ..Default::default()};
+        if !self.sync {
+            newfile.node.nodeidx = self.nextidx;
+            self.nextidx += 1;
+        }
+        self.dirs.push(newfile);
+        self.dirs.lastpos()
+    }
+    fn createfolder(&mut self, foldername: &str) -> (usize, usize) {
+        let mut newfolder = FileNode {name: foldername.into(), ..Default::default()};
+        let mut sname = match foldername.len() >= 4 {
+            true => String::from(&foldername[0..4]),
+            false => String::from(foldername)
+        };
+        while sname.len() < 4 {
+            sname.push(' ');
+        }
+        newfolder.node.shortname = sname.to_ascii_uppercase().as_bytes().try_into().unwrap_or_default();
+        self.folders.push(newfolder);
+        self.createdir(foldername, FileAttr::FOLDER);
+        (self.folders.lastpos(), self.dirs.lastpos())
+    }
+    fn importnode(&mut self, filepath: String, attr: FileAttr) {
+        let path: &Path = filepath.as_ref();
+        let items = std::fs::read_dir(path).unwrap().into_iter()
+        .filter_map(|x| x.ok()).collect::<Vec<_>>();
+        let mut idxs = vec![];
+        let mut jsons = vec![];
+        for item in items {
+            let p = item.path();
+            let name = String::from(p.file_name().unwrap_or_default().to_string_lossy());
+            if name == "." || name == ".." {
+                continue;
+            }
+            if name == "folder.json" || name == "parent.json" {
+                jsons.push(p);
+                continue;
+            }
+            if p.is_dir() {
+                let (o, _) = self.createfolder(name.as_str());
+                idxs.push(o);
+            } else {
+                let idx = self.createfile(name.as_str(), attr);
+                self.dirs[idx].data = std::fs::read(p).unwrap_or_default();
+            }
+        }
+        for json in jsons {
+            let node = readjson(json);
+            self.dirs.push(node);
+        }
+        for idx in idxs {
+            let node = &self.folders[idx];
+            let filepath = format!("{}\\{}", path.display(), &node.name);
+            self.importnode(filepath, attr);
+        }
+    }
+    pub fn importfromfolder(&mut self, filepath: String, attr: FileAttr) {
+        if self.folders.len() == 0 {
+            let lastslashidx = filepath.rfind('\\').unwrap_or_default();
+            let name = match lastslashidx {
+                0 => &filepath,
+                _ => &filepath[lastslashidx+1..]
+            };
+            let mut root = FileNode { name: name.into(), isroot: true, ..Default::default()};
+            root.node.shortname = *b"ROOT";
+            self.folders.push(root);
+        }
+        self.importnode(filepath, attr);
     }
 }
