@@ -1,15 +1,14 @@
-use std::{borrow::Cow, io::{Cursor, Read}, path::{PathBuf, Path}};
-
+use crate::traits::*;
 use binrw::prelude::*;
-use binrw::*;
+use binrw::Endian;
 use bitflags::*;
-use crate::{seektask, lastpos::LastPos};
-use serde::*;
+use std::io::{Read, Seek, Write, BufRead, SeekFrom};
+use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
 use serde_json;
 
 bitflags! {
-    #[derive(Default, Serialize, Deserialize)]
-    #[binrw]
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
     pub struct FileAttr: u8 {
         const FILE = 0x1;
         const FOLDER = 0x2;
@@ -23,9 +22,47 @@ bitflags! {
     }
 }
 
+impl BinRead for FileAttr {
+    type Args<'a> = ();
+    fn read_options<R: Read + Seek>(
+            reader: &mut R,
+            _: Endian,
+            _: Self::Args<'_>,
+        ) -> BinResult<Self> {
+        Ok(Self::from_bits_retain(reader.read_ne()?))
+    }
+}
+
+impl BinWrite for FileAttr {
+    type Args<'a> = ();
+    fn write_options<W: Write + Seek>(
+            &self,
+            writer: &mut W,
+            _: Endian,
+            _: Self::Args<'_>,
+        ) -> BinResult<()> {
+        writer.write_ne(&self.bits())
+    }
+}
+
+impl Serialize for FileAttr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer {
+        self.bits().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for FileAttr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de> {
+        Ok(Self::from_bits_retain(u8::deserialize(deserializer)?))
+    }
+}
+
 bitflags! {
-    #[derive(Default)]
-    #[binrw]
+    #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
     pub struct PreloadType: i8 {
         const NONE = -1;
         const MRAM = 0;
@@ -34,8 +71,30 @@ bitflags! {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-#[binrw]
+impl BinRead for PreloadType {
+    type Args<'a> = ();
+    fn read_options<R: Read + Seek>(
+            reader: &mut R,
+            _: Endian,
+            _: Self::Args<'_>,
+        ) -> BinResult<Self> {
+        Ok(Self::from_bits_retain(reader.read_ne()?))
+    }
+}
+
+impl BinWrite for PreloadType {
+    type Args<'a> = ();
+    fn write_options<W: Write + Seek>(
+            &self,
+            writer: &mut W,
+            _: Endian,
+            _: Self::Args<'_>,
+        ) -> BinResult<()> {
+        writer.write_ne(&self.bits())
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, BinRead, BinWrite)]
 pub struct Header {
     pub filesize: u32,
     pub headersize: u32,
@@ -46,8 +105,7 @@ pub struct Header {
     pub dvdsize: u32
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-#[binrw]
+#[derive(Debug, Clone, Copy, Default, BinRead, BinWrite)]
 pub struct DataHeader {
     pub dirnodecount: u32,
     pub dirnodeoff: u32,
@@ -57,176 +115,134 @@ pub struct DataHeader {
     pub stringtableoff: u32
 }
 
-pub mod folder {
-    use super::*;
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-    #[binrw]
-    pub struct Node {
-        pub shortname: [u8; 4],
-        pub nameoff: u32,
-        pub hash: u16,
-        pub filecount: u16,
-        pub firstfileoff: u32
-    }
+#[derive(Debug, Clone, Copy, Default, BinRead, BinWrite, Serialize, Deserialize)]
+pub struct FolderInfo {
+    pub shortname: [u8; 4],
+    pub nameoff: u32,
+    pub hash: u16,
+    pub filecount: u16,
+    pub firstfileoff: u32
 }
 
-pub mod dir {
-    use super::*;
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-    #[binrw]
-    pub struct Node {
-        pub nodeidx: u16,
-        pub hash: u16,
-        pub attrandnameoff: u32,
-        pub data: u32,
-        pub datasize: u32
-    }
+#[derive(Debug, Clone, Copy, Default, BinRead, BinWrite, Serialize, Deserialize)]
+pub struct DirInfo {
+    pub nodeidx: u16,
+    pub hash: u16,
+    pub attrandnameoff: u32,
+    pub data: u32,
+    pub datasize: u32
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, BinRead, BinWrite, Serialize, Deserialize)]
 pub struct FileNode {
-    pub node: folder::Node,
+    pub info: FolderInfo,
+    #[brw(ignore)]
     pub isroot: bool,
+    #[brw(ignore)]
     pub name: String,
-    pub dir: Option<*const DirNode>
+    #[serde(skip)]
+    #[brw(ignore)]
+    pub dir: Option<usize>
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, BinRead, BinWrite, Serialize, Deserialize)]
 pub struct DirNode {
-    pub node: dir::Node,
+    pub info: DirInfo,
+    #[brw(ignore)]
     pub attr: FileAttr,
+    #[brw(ignore)]
     pub name: String,
+    #[brw(ignore)]
     pub nameoff: u16,
+    #[brw(ignore)]
     #[serde(skip)]
     pub data: Vec<u8>,
+    #[brw(ignore)]
     #[serde(skip)]
-    pub folder: Option<*const FileNode>,
+    pub folder: Option<usize>,
+    #[brw(ignore)]
     #[serde(skip)]
-    pub parent: Option<*const FileNode>
+    pub parent: Option<usize>
 }
 
-#[derive(Debug, Clone)]
-pub struct RARC<'a> {
-    pub folders: Vec<FileNode>,
-    pub dirs: Vec<DirNode>,
+#[derive(Debug, Clone, Default, BinRead)]
+pub struct RARC {
     pub header: Header,
     pub dataheader: DataHeader,
     pub nextidx: u16,
+    #[brw(ignore)]
     pub sync: bool,
-    pub data: Cow<'a, [u8]>,
-    pub endian: Endian
+    #[brw(ignore)]
+    pub folders: Vec<FileNode>,
+    #[brw(ignore)]
+    pub dirs: Vec<DirNode>
 }
 
-impl<'a> Default for RARC<'a> {
-    fn default() -> Self {
-        Self 
-        { folders: Default::default(), dirs: Default::default(), header: Default::default(),
-            dataheader: Default::default(), nextidx: Default::default(), sync: Default::default(),
-            data: Default::default(), endian: Endian::NATIVE 
-        }
-    }
-}
-
-#[inline(always)]
-fn read<T: BinRead, R: BinReaderExt>(endian: Endian, reader: &mut R) -> binrw::BinResult<T>
-where <T as BinRead>::Args: std::default::Default {
-    Ok(match endian {
-        Endian::Big => reader.read_be()?,
-        Endian::Little => reader.read_le()?,
-    })
-}
-
-#[inline(always)]
-fn readjson<P: AsRef<Path>>(path: P) -> DirNode {
-    let msg = std::fs::read_to_string(path).unwrap_or_default();
-    serde_json::from_str(&msg).unwrap_or_default()
-}
-
-#[inline(always)]
-fn write<T: BinWrite, W: BinWriterExt>(endian: Endian, item: T, writer: &mut W) -> binrw::BinResult<()>
-where <T as BinWrite>::Args: std::default::Default {
-    writer.write_type(&item, endian)
-}
-
-impl <'a> RARC<'a> {
-    pub fn read<T: Into<Cow<'a, [u8]>>>(data: T) -> Self {
-        let data: Cow<'a, [u8]> = data.into();
-        let mut reader = Cursor::new(data.as_ref());
-        reader.set_position(4);
-        let magic = seektask::readntstringat(&mut reader, 0);
-        let endian = match magic.as_str() {
-            "RARC" => Endian::Big,
+impl RARC {
+    pub fn read<R: BinReaderExt + BufRead>(reader: &mut R) -> BinResult<RARC> {
+        let mut magic = vec![0u8; 4];
+        reader.read_exact(&mut magic)?;
+        let mgc = String::from(String::from_utf8_lossy(&magic));
+        let endian = match mgc.as_str() {
             "CRAR" => Endian::Little,
-            _ => Endian::NATIVE
+            "RARC" => Endian::Big,
+            _ => Endian::NATIVE,
         };
-        let header: Header = read(endian, &mut reader).unwrap_or_default();
-        let dataheader: DataHeader = read(endian, &mut reader).unwrap_or_default();
-        let nextidx: u16 = read(endian, &mut reader).unwrap_or_default();
-        let sync = u8::read(&mut reader).unwrap_or_default() != 0;
-        reader.set_position((dataheader.dirnodeoff + header.headersize) as u64);
-        let mut folders = Vec::<FileNode>::with_capacity(dataheader.dirnodecount as usize);
-        let mut dirs = Vec::<DirNode>::with_capacity(dataheader.filenodecount as usize);
+        let mut result: RARC = reader.read_type(endian)?;
+        result.sync = reader.read_ne::<u8>()? != 0;
+        let Self {header, dataheader, folders,
+            dirs, ..} = &mut result;
+        reader.seek(SeekFrom::Start((dataheader.dirnodeoff + header.headersize) as u64))?;
+        folders.reserve_exact(dataheader.dirnodecount as usize);
+        dirs.reserve_exact(dataheader.filenodecount as usize);
         for i in 0..folders.capacity() {
-            let mut node: FileNode = Default::default();
-            node.node = read(endian, &mut reader).unwrap_or_default();
-            let pos = (dataheader.stringtableoff + header.headersize + node.node.nameoff) as u64;
-            node.name = seektask::readntstringat(&mut reader, pos);
-            if i == 0 {
-                node.isroot = true;
-            }
+            let mut node = FileNode::read_options(reader, endian, ())?;
+            let pos = (dataheader.stringtableoff + header.headersize + node.info.nameoff) as u64;
+            node.name = readntstringat(reader, SeekFrom::Start(pos))?;
+            node.isroot = i == 0;
             folders.push(node);
         }
-        reader.set_position((dataheader.filenodeoff + header.headersize) as u64);
+        reader.seek(SeekFrom::Start((dataheader.filenodeoff + header.headersize) as u64))?;
         for _ in 0..dirs.capacity() {
-            let mut node: DirNode = Default::default();
-            node.node = read(endian, &mut reader).unwrap_or_default();
-            reader.set_position(reader.position() + 4);
-            node.nameoff = (node.node.attrandnameoff & 0x00FFFFFF) as u16;
-            node.attr = FileAttr { bits: (node.node.attrandnameoff >> 24) as u8 };
+            let mut node = DirNode::read_options(reader, endian, ())?;
+            reader.seek(SeekFrom::Current(4))?;
+            node.nameoff = (node.info.attrandnameoff & 0x00FFFFFF) as u16;
+            node.attr = FileAttr::from_bits_retain((node.info.attrandnameoff >> 24) as u8);
             let pos = (dataheader.stringtableoff + header.headersize + node.nameoff as u32) as u64;
-            node.name = seektask::readntstringat(&mut reader, pos);
+            node.name = readntstringat(reader, SeekFrom::Start(pos))?;
             if node.attr.contains(FileAttr::FILE) {
-                let pos = (header.filedataoff + header.headersize + node.node.data) as u64;
-                seektask::seektask(&mut reader, pos, |task| {
-                    node.data = vec![0u8; node.node.datasize as usize];
-                    task.reader.read_exact(&mut node.data).unwrap();
-                })
+                let pos = (header.filedataoff + header.headersize + node.info.data) as u64;
+                node.data = reader.seektask(SeekFrom::Start(pos), |task| {
+                    let mut vec = vec![0u8; node.info.datasize as usize];
+                    task.read_exact(&mut vec)?;
+                    Ok(vec)
+                })?;
             }
             dirs.push(node);
         }
-        let mut res = Self {
-            folders,
-            dirs,
-            data,
-            dataheader,
-            header,
-            sync,
-            nextidx,
-            endian
-        };
-        res.sortparents();
-        res
+        result.findparents();
+        Ok(result)
     }
-    fn sortparents(&mut self) {
-        for dir in &mut self.dirs {
-            if dir.attr.contains(FileAttr::FOLDER) && dir.node.data != u32::MAX {
-                dir.folder = Some(&self.folders[dir.node.data as usize]);
-                if dir.node.hash == self.folders[dir.node.data as usize].node.hash {
-                    self.folders[dir.node.data as usize].dir = Some(dir);
+    fn findparents(&mut self) {
+        for i in 0..self.dirs.len() {
+            let dir = &mut self.dirs[i];
+            if dir.attr.contains(FileAttr::FOLDER) && dir.info.data != u32::MAX {
+                dir.folder = Some(dir.info.data as usize);
+                if dir.info.hash == self.folders[dir.info.data as usize].info.hash {
+                    self.folders[dir.info.data as usize].dir = Some(i);
                 }
             }
         }
-        for folder in &self.folders {
-            for y in folder.node.firstfileoff..(folder.node.firstfileoff+folder.node.filecount as u32) {
-                let y = y as usize;
-                let dir = &mut self.dirs[y];
-                dir.parent = Some(folder);
+        for i in 0..self.folders.len() {
+            let folder = &self.folders[i];
+            for y in folder.info.firstfileoff..(folder.info.firstfileoff+folder.info.filecount as u32) {
+                self.dirs[y as usize].folder = Some(i);
             }
         }
     }
     fn getchildren(&self, node: &FileNode) -> Vec<&DirNode> {
         let mut idxs = vec![];
-        for y in node.node.firstfileoff..(node.node.firstfileoff+node.node.filecount as u32) {
+        for y in node.info.firstfileoff..(node.info.firstfileoff+node.info.filecount as u32) {
             idxs.push(y as usize);
         }
         self.dirs.iter().enumerate().filter(|(x, _)| idxs.contains(x)).map(|(_, x)| x)
@@ -234,7 +250,7 @@ impl <'a> RARC<'a> {
     }
     fn findfolder(&self, dir: &DirNode) -> Option<&FileNode> {
         match dir.folder {
-            Some(n) => unsafe { n.as_ref() },
+            Some(n) => Some(&self.folders[n]),
             None => None
         }
     }
@@ -256,101 +272,26 @@ impl <'a> RARC<'a> {
         result.reverse();
         result
     }
-    pub fn extract(&self) {
+    pub fn extract(&mut self) -> BinResult<()> {
         for folder in &self.folders {
             let children = self.getchildren(folder);
             let tree = self.getroot(&children);
             let mut path = PathBuf::from(tree[0].name.clone());
-            for i in 1..tree.len() {
-                path = path.join(&tree[i].name);
+            for t in 1..tree.len() {
+                path.push(&tree[t].name);
             }
-            std::fs::create_dir_all(&path).unwrap();
+            std::fs::create_dir_all(&path)?;
             for child in children.iter()
             .filter(|x| x.attr.contains(FileAttr::FILE)) {
-                std::fs::write(path.join(&child.name), &child.data).unwrap();
+                std::fs::write(path.join(&child.name), &child.data)?;
             }
             let fptr = children[children.len() - 2];
             let rptr = children[children.len() - 1];
             let mut msg = serde_json::to_string_pretty(fptr).unwrap_or_default();
-            std::fs::write(path.join("folder.json"), &msg).unwrap();
+            std::fs::write("folder.json", &msg)?;
             msg = serde_json::to_string_pretty(rptr).unwrap_or_default();
-            std::fs::write(path.join("parent.json"), msg).unwrap();
+            std::fs::write("parent.json", msg)?;
         }
-    }
-    fn createdir(&mut self, dirname: &str, attr: FileAttr) -> usize {
-        let mut newdir = DirNode {attr, name: dirname.into(), ..Default::default()};
-        newdir.node.nodeidx = u16::MAX;
-        self.dirs.push(newdir);
-        self.dirs.lastpos()
-    }
-    fn createfile(&mut self, filename: &str, attr: FileAttr) -> usize {
-        let mut newfile = DirNode {attr, name: filename.into(), ..Default::default()};
-        if !self.sync {
-            newfile.node.nodeidx = self.nextidx;
-            self.nextidx += 1;
-        }
-        self.dirs.push(newfile);
-        self.dirs.lastpos()
-    }
-    fn createfolder(&mut self, foldername: &str) -> (usize, usize) {
-        let mut newfolder = FileNode {name: foldername.into(), ..Default::default()};
-        let mut sname = match foldername.len() >= 4 {
-            true => String::from(&foldername[0..4]),
-            false => String::from(foldername)
-        };
-        while sname.len() < 4 {
-            sname.push(' ');
-        }
-        newfolder.node.shortname = sname.to_ascii_uppercase().as_bytes().try_into().unwrap_or_default();
-        self.folders.push(newfolder);
-        self.createdir(foldername, FileAttr::FOLDER);
-        (self.folders.lastpos(), self.dirs.lastpos())
-    }
-    fn importnode(&mut self, filepath: String, attr: FileAttr) {
-        let path: &Path = filepath.as_ref();
-        let items = std::fs::read_dir(path).unwrap().into_iter()
-        .filter_map(|x| x.ok()).collect::<Vec<_>>();
-        let mut idxs = vec![];
-        let mut jsons = vec![];
-        for item in items {
-            let p = item.path();
-            let name = String::from(p.file_name().unwrap_or_default().to_string_lossy());
-            if name == "." || name == ".." {
-                continue;
-            }
-            if name == "folder.json" || name == "parent.json" {
-                jsons.push(p);
-                continue;
-            }
-            if p.is_dir() {
-                let (o, _) = self.createfolder(name.as_str());
-                idxs.push(o);
-            } else {
-                let idx = self.createfile(name.as_str(), attr);
-                self.dirs[idx].data = std::fs::read(p).unwrap_or_default();
-            }
-        }
-        for json in jsons {
-            let node = readjson(json);
-            self.dirs.push(node);
-        }
-        for idx in idxs {
-            let node = &self.folders[idx];
-            let filepath = format!("{}\\{}", path.display(), &node.name);
-            self.importnode(filepath, attr);
-        }
-    }
-    pub fn importfromfolder(&mut self, filepath: String, attr: FileAttr) {
-        if self.folders.len() == 0 {
-            let lastslashidx = filepath.rfind('\\').unwrap_or_default();
-            let name = match lastslashidx {
-                0 => &filepath,
-                _ => &filepath[lastslashidx+1..]
-            };
-            let mut root = FileNode { name: name.into(), isroot: true, ..Default::default()};
-            root.node.shortname = *b"ROOT";
-            self.folders.push(root);
-        }
-        self.importnode(filepath, attr);
+        Ok(())
     }
 }
