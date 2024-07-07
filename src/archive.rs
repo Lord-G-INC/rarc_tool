@@ -10,7 +10,7 @@ use crate::seek_task::SeekTask;
 use crate::hash::calchash;
 
 
-#[derive(Debug, Default, Clone, Copy, BinRead, BinWrite)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, BinRead, BinWrite)]
 pub struct JKRFolderInfo {
     pub shortname: [u8; 4],
     pub nameoffs: u32,
@@ -19,18 +19,17 @@ pub struct JKRFolderInfo {
     pub firstfileoff: u32
 }
 
-#[derive(Debug, Default, Clone, BinRead, BinWrite)]
+#[derive(Debug, Default, Clone, PartialEq, BinRead)]
 pub struct JKRFolderNode {
     pub node: JKRFolderInfo,
-    #[brw(ignore)]
+    #[br(ignore)]
     pub isroot: bool,
-    #[brw(ignore)]
+    #[br(ignore)]
     pub name: String,
     
-    #[brw(ignore)]
+    #[br(ignore)]
     pub filenode: Option<usize>,
     #[br(calc(Vec::with_capacity(node.filecount as usize)))]
-    #[bw(ignore)]
     pub childnodes: Vec<usize>
 }
 
@@ -47,6 +46,23 @@ impl JKRFolderNode {
     }
 }
 
+impl BinWrite for JKRFolderNode {
+    type Args<'a> = ();
+    fn write_options<W: std::io::Write + std::io::Seek>(
+            &self,
+            writer: &mut W,
+            endian: Endian,
+            _: Self::Args<'_>,
+        ) -> BinResult<()> {
+        let shortname = self.get_short_name().into_bytes();
+        writer.write(&shortname)?;
+        writer.write_type(&self.node.nameoffs, endian)?;
+        writer.write_type(&calchash(&self.name), endian)?;
+        writer.write_type(&(self.childnodes.len() as u16), endian)?;
+        writer.write_type(&self.node.firstfileoff, endian)
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy, BinRead, BinWrite, PartialEq)]
 pub struct JKRFileInfo {
     pub nodeidx: u16,
@@ -59,9 +75,9 @@ pub struct JKRFileInfo {
 #[derive(Debug, Default, Clone, BinRead, PartialEq)]
 pub struct JKRFileNode {
     pub node: JKRFileInfo,
-    #[br(ignore)]
+    #[br(calc(JKRFileAttr::from(node.attrandnameoffs >> 24)))]
     pub attr: JKRFileAttr,
-    #[br(ignore)]
+    #[br(calc((node.attrandnameoffs & 0x00FFFFFF) as u16))]
     pub nameoffs: u16,
 
     #[br(ignore)]
@@ -155,8 +171,6 @@ impl JKRArchive {
         stream.seek(Start(archive.dataheader.filenodeoffset as u64 + headersize))?;
         for i in 0..archive.dataheader.filenodecount {
             let mut dir: JKRFileNode = stream.read_type(endian)?;
-            dir.attr = JKRFileAttr::from(dir.node.attrandnameoffs >> 24);
-            dir.nameoffs = (dir.node.attrandnameoffs & 0x00FFFFFF) as u16;
             stream.seek(Current(4))?;
             dir.name = table[dir.nameoffs as u32].clone();
             if dir.is_dir() && dir.node.data != u32::MAX {
@@ -268,5 +282,5 @@ impl JKRArchive {
     }
     pub fn unpack<A: AsRef<Path>>(&self, dir: A) -> std::io::Result<()> {
         self.unpack_node(&self.foldernodes[0], dir)
-    } 
+    }
 }
