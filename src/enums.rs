@@ -2,7 +2,9 @@ use bitflags::bitflags;
 use binrw::prelude::*;
 
 bitflags! {
-    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+    #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, BinRead, BinWrite)]
+    #[br(map = |x| Self::from_bits_retain(x))]
+    #[bw(map = |x: &Self| x.bits())]
     pub struct JKRFileAttr : u8 {
         const FILE = 0x01;
         const FOLDER = 0x02;
@@ -16,38 +18,29 @@ bitflags! {
     }
 }
 
-impl BinRead for JKRFileAttr {
-    type Args<'a> = ();
-    fn read_options<R: std::io::Read + std::io::Seek>(
-            reader: &mut R,
-            _: binrw::Endian,
-            _: Self::Args<'_>,
-        ) -> BinResult<Self> {
-        Ok(JKRFileAttr::from_bits_retain(reader.read_ne()?))
-    }
-}
-
-impl BinWrite for JKRFileAttr {
-    type Args<'a> = ();
-    fn write_options<W: std::io::Write + std::io::Seek>(
-            &self,
-            writer: &mut W,
-            _: binrw::Endian,
-            _: Self::Args<'_>,
-        ) -> BinResult<()> {
-        writer.write_ne(&self.0.0)
-    }
-}
-
 impl From<JKRFileAttr> for u32 {
     fn from(value: JKRFileAttr) -> Self {
-        value.0.0 as u32
+        value.bits().into()
     }
 }
 
 impl From<u32> for JKRFileAttr {
     fn from(value: u32) -> Self {
-        Self::from_bits_truncate(value as u8)
+        Self::from_bits_retain(value as u8)
+    }
+}
+
+impl JKRFileAttr {
+    pub const fn preload_type(&self) -> JKRPreloadType {
+        if self.contains(Self::LOAD_TO_MRAM) {
+            JKRPreloadType::MRAM
+        } else if self.contains(Self::LOAD_TO_ARAM) {
+            JKRPreloadType::ARAM
+        } else if self.contains(Self::LOAD_FROM_DVD) {
+            JKRPreloadType::DVD
+        } else {
+            JKRPreloadType::NONE
+        }
     }
 }
 

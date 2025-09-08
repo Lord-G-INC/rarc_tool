@@ -2,8 +2,6 @@
 
 use std::{error::Error, io::Cursor};
 
-use archive::JKRArchive;
-
 mod util;
 mod types;
 mod archive;
@@ -21,7 +19,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         false => data
     };
     let mut cursor = Cursor::new(data);
-    let arch = JKRArchive::read(&mut cursor)?;
+    let mut arch = archive::JKRArchive::default();
+    arch.read(&mut cursor)?;
     arch.unpack(std::env::current_dir()?)?;
     Ok(())
 }

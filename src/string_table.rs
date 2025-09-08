@@ -1,9 +1,5 @@
 use std::collections::HashMap;
-use std::io::SeekFrom::Start;
 use std::ops::{Index, IndexMut};
-
-use crate::seek_task::SeekTask;
-use crate::archive::JKRArchive;
 use binrw::prelude::*;
 
 
@@ -15,15 +11,9 @@ pub struct StringTable {
 
 
 impl StringTable {
-    pub fn from_archive<R: BinReaderExt>(arch: &JKRArchive, stream: &mut R) -> BinResult<Self> {
-        let mut result = StringTable::default();
-        let off = arch.dataheader.stringtableoffset as u64 + arch.header.headersize as u64;
-        let size = arch.dataheader.stringtablesize as usize;
-        result.data = stream.seek_task(Start(off), |f| {
-            let mut data = vec![0u8; size];
-            f.read_exact(&mut data)?;
-            Ok(data)
-        })?;
+    pub fn from_data(data: &[u8]) -> Self {
+        let mut result = Self::default();
+        result.data = data.to_vec();
         let mut i = 0;
         let mut off = 0u32;
         while i < result.data.len() {
@@ -36,6 +26,7 @@ impl StringTable {
                 i += 1;
             }
             let str = String::from(String::from_utf8_lossy(&bytes));
+            println!("{}", &str);
             result.table.insert(off, str);
             off += bytes.len() as u32 + 1;
             if result.data[i..].iter().all(|x| *x == 0) {
@@ -43,8 +34,8 @@ impl StringTable {
                 break;
             }
         }
-        Ok(result)
-    }
+        result
+    }    
 
     pub fn reverse_table(&self) -> HashMap<String, u32> {
         self.table.iter().map(|(k, v)| (v.clone(), *k)).collect()
