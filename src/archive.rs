@@ -123,8 +123,7 @@ impl Archive {
     fn sort_nodes(&mut self, node: Reference<Directory>) {
         let mut shortcuts = Vec::new();
         let mut folders = Vec::new();
-        let mut borrow = node.borrow_mut();
-        for file in borrow.children.clone() {
+        for file in node.borrow().children.clone() {
             if file.borrow().is_shortcut() {
                 shortcuts.push(file);
             } else if file.borrow().is_dir() {
@@ -136,27 +135,22 @@ impl Archive {
                 Some(folder) => {
                     self.folders.iter()
                     .position(|x| {
-                        if let Ok(xref) = x.try_borrow()
-                            && let Ok(fborrow) = folder.try_borrow() {
-                            xref.eq(&fborrow)
-                        } else {
-                            false
-                        }
+                        x == folder
                     })
-                    .map(|x| x as u32).unwrap_or(u32::MAX)
+                    .map(|x| x as u32).unwrap()
                 },
                 None => u32::MAX
             };
             shortcut.borrow_mut().node.data = index;
-            let shidx = borrow.children.iter()
+            let shidx = node.borrow().children.iter()
             .position(|x| x == &shortcut).unwrap();
-            borrow.children.remove(shidx as usize);
-            borrow.children.push(shortcut.clone());
+            node.borrow_mut().children.remove(shidx as usize);
+            node.borrow_mut().children.push(shortcut.clone());
         }
-        borrow.node.file_off = self.files.len() as u32;
-        let child_count = borrow.children.len() as u16;
-        borrow.node.file_count = child_count;
-        for child in &borrow.children {
+        node.borrow_mut().node.file_off = self.files.len() as u32;
+        let child_count = node.borrow().children.len() as u16;
+        node.borrow_mut().node.file_count = child_count;
+        for child in &node.borrow().children {
             self.files.push(child.clone());
         }
         for dir in folders {
@@ -164,12 +158,7 @@ impl Archive {
                 let folder = dir_ref.folder.as_ref().unwrap();
                 let index = self.folders.iter()
                     .position(|x| {
-                        if let Ok(xborrow) = x.try_borrow()
-                            && let Ok(fborrow) = folder.try_borrow() {
-                            xborrow.eq(&fborrow)
-                        } else {
-                            false
-                        }
+                        x == folder
                     }).unwrap();
                 dir_ref.node.data = index as u32;
             }
@@ -202,9 +191,8 @@ impl Archive {
             Some(true_dir.clone()), Some(true_dir.clone()));
         File::create("..", FileAttr::FOLDER,
         parent.clone(), Some(true_dir.clone()));
-        true_dir.borrow_mut().children.push(file);
+        true_dir.borrow_mut().file = Some(file);
         self.folders.push(true_dir.clone());
-        self.sort();
         true_dir
     }
 
@@ -231,7 +219,6 @@ impl Archive {
         Some(self.root.clone()), Some(self.root.clone()));
         File::create("..", FileAttr::FOLDER,
         None, Some(self.root.clone()));
-        self.sort();
     }
 
     pub fn create<A: AsRef<str>>(name: A, sync: bool) -> Self  {
