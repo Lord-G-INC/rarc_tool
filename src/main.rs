@@ -1,26 +1,17 @@
-#![allow(dead_code)]
+use std::io::Cursor;
+use rarc_lib::*;
 
-use std::{error::Error, io::Cursor};
-
-mod util;
-mod types;
-mod archive;
-mod enums;
-mod hash;
-mod string_table;
-mod seek_task;
-
-fn main() -> Result<(), Box<dyn Error>> {
-    let path = "WarpAreaErrorLayout.arc";
-    let mut data = std::fs::read(path)?;
-    let magic = String::from_utf8_lossy(&data[0..4]);
-    data = match magic.eq("Yaz0") {
-        true => util::decode(data)?,
-        false => data
-    };
-    let mut cursor = Cursor::new(data);
-    let mut arch = archive::JKRArchive::default();
-    arch.read(&mut cursor)?;
-    arch.unpack(std::env::current_dir()?)?;
+fn main() -> binrw::BinResult<()> {
+    let mut data = std::fs::read("AbekobeGalaxyMap.arc")?;
+    data = decompres_yaz0(data);
+    let mut reader = Cursor::new(data);
+    let mut archive = Archive::default();
+    archive.read(&mut reader)?;
+    archive.unpack(std::env::current_dir()?)?;
+    archive = Archive::create("AbekobeGalaxyMap", true);
+    archive.import("Stage", FileAttr::FILE | FileAttr::LOAD_TO_MRAM)?;
+    let mut save = archive.to_bytes(binrw::Endian::Big)?;
+    save = compress_yaz0(save, yaz0::CompressionLevel::Lookahead { quality: 7 });
+    std::fs::write("test.arc", save)?;
     Ok(())
 }

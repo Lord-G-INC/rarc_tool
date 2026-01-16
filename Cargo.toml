@@ -1,11 +1,18 @@
 [package]
 name = "rarc_tool"
 version = "0.1.0"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+edition = "2024"
 
 [dependencies]
-binrw = "0.14.0"
-bitflags = "2.6.0"
-szs = "0.3.5"
+binrw = "0.15.0"
+bitflags = "2.10.0"
+yaz0 = "0.3.0"
+
+
+[lib]
+name = "rarc_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rarc_tool"
+path = "src/main.rs"
