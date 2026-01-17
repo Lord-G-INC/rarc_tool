@@ -4,15 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-binrw = "0.15.0"
-bitflags = "2.10.0"
-yaz0 = "0.3.0"
-
-
-[lib]
-name = "rarc_lib"
-path = "src/lib.rs"
-
-[[bin]]
-name = "rarc_tool"
-path = "src/main.rs"
+rarc_lib = {version = "0.1.0", path = "lib"}

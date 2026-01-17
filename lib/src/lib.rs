@@ -7,6 +7,8 @@ pub mod header;
 pub mod nodes;
 pub mod archive;
 pub mod table;
+pub use binrw;
+pub use yaz0;
 
 /// Typedef for the Node types to make use of.
 pub type Reference<T> = Rc<RefCell<T>>;
