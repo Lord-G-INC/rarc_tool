@@ -7,3 +7,9 @@ edition = "2024"
 binrw = "0.15.0"
 bitflags = "2.10.0"
 yaz0 = "0.3.0"
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[features]
+c_exports = []
