@@ -1,4 +1,4 @@
-use std::{io::{Cursor, SeekFrom}, path::Path};
+use std::{io::{Cursor, SeekFrom}, path::{Path, PathBuf}};
 
 use super::{Reference, header::{*, self}, nodes::*, make_reference};
 use super::nodes::file::FileAttr;
@@ -93,8 +93,9 @@ impl Archive {
         }
         Ok(())
     }
-    pub fn unpack<A: AsRef<Path>>(&self, dir: A) -> std::io::Result<()> {
-        self.root.borrow().unpack(dir)
+    pub fn unpack<A: AsRef<Path>>(&self, dir: A) -> std::io::Result<PathBuf> {
+        self.root.borrow().unpack(dir.as_ref())?;
+        Ok(dir.as_ref().join(&self.root.borrow().name))
     }
 
     fn recalc_file_indicies(&mut self) {
