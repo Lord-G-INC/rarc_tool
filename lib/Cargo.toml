@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 binrw = "0.15.0"
 bitflags = "2.10.0"
+cxx = { version = "1.0.192", optional = true }
 yaz0 = "0.3.0"
 
 [lib]
@@ -13,3 +14,7 @@ crate-type = ["rlib", "cdylib"]
 
 [features]
 c_exports = []
+cxx = ["dep:cxx", "dep:cxx-build"]
+
+[build-dependencies]
+cxx-build = { version = "1.0.192", optional = true }

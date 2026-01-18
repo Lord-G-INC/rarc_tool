@@ -13,6 +13,9 @@ pub use yaz0;
 #[cfg(feature = "c_exports")]
 pub mod c_exports;
 
+#[cfg(feature = "cxx")]
+pub mod cpp_exports;
+
 /// Typedef for the Node types to make use of.
 pub type Reference<T> = Rc<RefCell<T>>;
 
