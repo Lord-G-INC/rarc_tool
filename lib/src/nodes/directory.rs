@@ -8,7 +8,7 @@ use super::file::File;
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 /// The directory's actual information.
 pub struct Node {
-    pub short_name: [u8; 4],
+    pub short_name: u32,
     pub name_off: u32,
     pub hash: u16,
     pub file_count: u16,
@@ -27,9 +27,12 @@ pub struct Directory {
 
 impl Directory {
     /// Generates this Directory's short name, always a length of 4.
-    pub const fn short_name(&self) -> [u8; 4] {
+    pub const fn short_name(&self) -> u32 {
         if self.is_root {
-            return [b'R', b'O', b'O', b'T'];
+            #[cfg(target_endian = "little")]
+            return u32::from_be_bytes([b'R', b'O', b'O', b'T']);
+            #[cfg(target_endian = "big")]
+            return u32::from_le_bytes([b'R', b'O', b'O', b'T']);
         }
         let mut result = [b' '; 4];
         let bytes = self.name.as_bytes();
@@ -39,7 +42,10 @@ impl Directory {
             result[i] = bytes[i].to_ascii_uppercase();
             i += 1;
         }
-        result
+        #[cfg(target_endian = "little")]
+        return u32::from_be_bytes(result);
+        #[cfg(target_endian = "big")]
+        return u32::from_le_bytes(result);
     }
     /// Reads this Directory with the given endian.
     pub fn read<R: BinReaderExt>(&mut self, reader: &mut R, endian: binrw::Endian) -> BinResult<()> {
@@ -48,7 +54,7 @@ impl Directory {
     }
     /// Writes this Directory with the given endian.
     pub fn write<W: BinWriterExt>(&self, writer: &mut W, endian: binrw::Endian) -> BinResult<()> {
-        writer.write(&self.short_name())?;
+        writer.write_type(&self.short_name(), endian)?;
         self.node.name_off.write_options(writer, endian, ())?;
         let hash = super::calc_hash(&self.name);
         hash.write_options(writer, endian, ())?;

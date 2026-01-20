@@ -83,7 +83,7 @@ fn main() -> binrw::BinResult<()> {
         let mut reader = Cursor::new(data);
         let mut archive = Archive::default();
         archive.read(&mut reader)?;
-        if let Some(out) = &output && out.is_dir() {
+        if let Some(out) = &output {
             archive.unpack(out)?;
         } else {
             if let Some(parent) = input.parent() {
@@ -99,10 +99,10 @@ fn main() -> binrw::BinResult<()> {
         let mut data = archive.to_bytes(endian.into())?;
         let level = yaz0::CompressionLevel::Lookahead { quality: 7 };
         data = compress_yaz0(data, level);
-        if let Some(out) = &output && out.is_file() {
+        if let Some(out) = &output {
             std::fs::write(out, data)?;
         } else {
-            std::fs::write(input.with_extension(".arc"), data)?;
+            std::fs::write(input.with_extension("arc"), data)?;
         }
     }
     Ok(())
