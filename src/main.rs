@@ -30,7 +30,6 @@ impl From<Endian> for binrw::Endian {
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
 enum Attr {
     #[default]
-    None,
     Mram,
     Aram,
     Dvd
@@ -39,7 +38,6 @@ enum Attr {
 impl From<Attr> for nodes::file::FileAttr {
     fn from(value: Attr) -> Self {
         match value {
-            Attr::None => Self::FILE,
             Attr::Mram => Self::FILE | Self::LOAD_TO_MRAM,
             Attr::Aram => Self::FILE | Self::LOAD_TO_ARAM,
             Attr::Dvd => Self::FILE | Self::LOAD_FROM_DVD
@@ -47,8 +45,43 @@ impl From<Attr> for nodes::file::FileAttr {
     }
 }
 
-#[derive(Parser, Clone, Debug, Default)]
-#[command(version, about, long_about = None)]
+#[derive(Debug, Clone, Copy, Subcommand)]
+enum Compression {
+    /// Compress the file with Naive lookback.
+    CompressNaive {
+        #[arg(short, long)]
+        /// Lookback distance. Set between 1 and 10; 10 corresponds to greatest lookback distance.
+        level: usize
+    },
+    /// Compress the file with Lookahead lookback.
+    CompressLookAhead {
+        #[arg(short, long)]
+        /// Lookback distance. Set between 1 and 10; 10 corresponds to greatest lookback distance.
+        level: usize
+    }
+}
+
+impl From<Compression> for yaz0::CompressionLevel {
+    fn from(value: Compression) -> Self {
+        match value {
+            Compression::CompressLookAhead { level } => 
+                yaz0::CompressionLevel::Lookahead 
+                    { quality: usize::clamp(level, 1, 10) },
+            Compression::CompressNaive { level } => 
+                yaz0::CompressionLevel::Naive 
+                    { quality: usize::clamp(level, 1, 10) }
+        }
+    }
+}
+
+impl Default for Compression {
+    fn default() -> Self {
+        Self::CompressLookAhead { level: 7 }
+    }
+}
+
+#[derive(Parser, Clone, Debug)]
+#[command(version, about, long_about = None, propagate_version = true)]
 struct Args {
     #[arg(required = true)]
     /// The input, if this is a file, attempt to unpack the Archive.
@@ -63,20 +96,20 @@ struct Args {
     pub endian: Endian,
     #[arg(short, long, default_value = "mram")]
     /// File attribute to use.
-    /// 
-    /// none does nothing.
-    /// 
-    /// mram loads to "main ram" (wii).
+    /// mram loads to "main ram" (wii, default).
     /// 
     /// aram loads to "auxiliary ram" (gcn).
     /// 
     /// dvd loads right off the DVD when needed (wii, gcn).
-    pub attr: Attr
+    pub attr: Attr,
+    #[command(subcommand)]
+    pub compression: Option<Compression>
 }
 
 fn main() -> binrw::BinResult<()> {
     let args = Args::parse();
-    let Args { input, output, endian, attr } = args;
+    let Args { input, output,
+        endian, attr, compression} = args;
     if input.is_file() {
         let mut data = std::fs::read(&input)?;
         data = decompres_yaz0(data);
@@ -98,8 +131,8 @@ fn main() -> binrw::BinResult<()> {
         let mut archive = Archive::create(name, true);
         archive.import(&input, attr.into())?;
         let mut data = archive.to_bytes(endian.into())?;
-        let level = yaz0::CompressionLevel::Lookahead { quality: 7 };
-        data = compress_yaz0(data, level);
+        let level = compression.unwrap_or_default();
+        data = compress_yaz0(data, level.into());
         let mut size = data.len();
         size = size.next_multiple_of(32) - size;
         let mut extra = vec![0u8; size];
