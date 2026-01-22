@@ -58,7 +58,7 @@ struct Args {
     /// Optional output, must be a dir when unpacking and a file when packing.
     pub output: Option<PathBuf>,
     #[arg(short, long, default_value = "big")]
-    /// ByteOrder to use, defaults to big sense the format is more used
+    /// ByteOrder to use, defaults to big given the format is more used
     /// on the Wii which is big.
     pub endian: Endian,
     #[arg(short, long, default_value = "mram")]
@@ -83,14 +83,15 @@ fn main() -> binrw::BinResult<()> {
         let mut reader = Cursor::new(data);
         let mut archive = Archive::default();
         archive.read(&mut reader)?;
-        if let Some(out) = &output {
-            archive.unpack(out)?;
+        let name = &archive.root.borrow().name;
+        if let Some(parent) = input.parent()
+            && !parent.to_string_lossy().is_empty() {
+            archive.unpack(&parent)?;
+            println!("Unpacked to {:?}", parent.join(name));
         } else {
-            if let Some(parent) = input.parent() {
-                archive.unpack(parent)?;
-            } else {
-                archive.unpack(std::env::current_dir()?)?;
-            }
+            let dir = std::env::current_dir()?;
+            archive.unpack(&dir)?;
+            println!("Unpacked to {:?}", dir.join(name));
         }
     } else if input.is_dir() {
         let name = input.file_name().unwrap().to_string_lossy();
@@ -99,10 +100,17 @@ fn main() -> binrw::BinResult<()> {
         let mut data = archive.to_bytes(endian.into())?;
         let level = yaz0::CompressionLevel::Lookahead { quality: 7 };
         data = compress_yaz0(data, level);
+        let mut size = data.len();
+        size = size.next_multiple_of(32) - size;
+        let mut extra = vec![0u8; size];
+        data.append(&mut extra);
         if let Some(out) = &output {
             std::fs::write(out, data)?;
+            println!("Packed to {:?}", std::path::absolute(out)?);
         } else {
-            std::fs::write(input.with_extension("arc"), data)?;
+            let path = input.with_extension("arc");
+            std::fs::write(&path, data)?;
+            println!("Packed to {:?}", std::path::absolute(path)?);
         }
     }
     Ok(())
