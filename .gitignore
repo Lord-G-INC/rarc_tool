@@ -16,3 +16,4 @@ rarc_tool*
 *.arc
 .vscode
 old/
+*.szs

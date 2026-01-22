@@ -106,7 +106,11 @@ impl File {
         let total = (attr << 24) | off;
         writer.write_type(&total, endian)?;
         writer.write_type(&self.node.data, endian)?;
-        writer.write_type(&self.node.data_size, endian)?;
+        if self.is_file() {
+            writer.write_type(&self.node.data_size, endian)?;
+        } else if self.is_dir() {
+            writer.write_type(&0x10u32, endian)?;
+        }
         Ok(())
     }
     /// Ditto of [Directory::to_string].

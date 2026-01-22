@@ -188,6 +188,7 @@ impl Archive {
         let file = 
         File::create(name, FileAttr::FOLDER,
             Some(true_dir.clone()), parent.clone());
+        file.borrow_mut().node.data_size = 0x10;
         File::create(".", FileAttr::FOLDER,
             Some(true_dir.clone()), Some(true_dir.clone()));
         File::create("..", FileAttr::FOLDER,
