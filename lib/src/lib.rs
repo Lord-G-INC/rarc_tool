@@ -7,6 +7,7 @@ pub mod header;
 pub mod nodes;
 pub mod archive;
 pub mod table;
+pub mod iter;
 pub use binrw;
 pub use yaz0;
 
