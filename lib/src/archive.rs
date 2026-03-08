@@ -1,4 +1,4 @@
-use std::{io::{Cursor, SeekFrom}, path::{Path, PathBuf}};
+use std::{io::{Cursor, SeekFrom}, path::{Path, PathBuf}, collections::HashMap};
 
 use super::{Reference, header::{*, self}, nodes::*, make_reference};
 use super::nodes::file::FileAttr;
@@ -374,9 +374,16 @@ fn collect_strings(table: &mut Table, node: Reference<Directory>) {
 
 fn write_file_data<W: BinWriterExt>(writer: &mut W, files: Vec<Reference<File>>) -> BinResult<u32> {
     let start = writer.stream_position()?;
+    let mut dict = HashMap::new();
     for i in 0..files.len() {
         let mut file = files[i].borrow_mut();
-        file.node.data = (writer.stream_position()? - start) as u32;
+        if let Some(offset) = dict.get(&file.data) {
+            file.node.data = *offset;
+            continue;
+        }
+        let offset = (writer.stream_position()? - start) as u32;
+        dict.insert(file.data.clone(), offset);
+        file.node.data = offset;
         writer.write_all(&file.data)?;
         while writer.stream_position()? % 32 != 0 {
             0u8.write_ne(writer)?;
